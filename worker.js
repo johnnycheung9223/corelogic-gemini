@@ -1,9 +1,9 @@
-// Gemini + Perplexity + DeepSeek Unified Proxy — v8.0
-// Make.com 只需一個 Webhook，Worker 自動呼叫三個 AI 並返回結果
+// Gemini + Perplexity + DeepSeek Unified Proxy — v12.0
+// 修復：gemini-1.5-flash (~8-10s) + 三個 AI 完全並行
 // POST / with {"issue": "..."} → returns {gemini, perplexity, deepseek}
 
 const PROJECT_ID = "gemini-worker-496408";
-const MODEL = "gemini-2.5-flash";
+const MODEL = "gemini-1.5-flash";
 const GEMINI_URL = `https://aiplatform.googleapis.com/v1beta1/projects/${PROJECT_ID}/locations/global/publishers/google/models/${MODEL}:generateContent`;
 const PERPLEXITY_URL = "https://api.perplexity.ai/chat/completions";
 const DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions";
@@ -50,12 +50,12 @@ async function callPerplexity(issue, apiKey) {
   return data?.choices?.[0]?.message?.content || JSON.stringify(data);
 }
 
-async function callDeepSeek(issue, geminiOutput, apiKey) {
+async function callDeepSeek(issue, apiKey) {
   const body = {
     model: "deepseek-chat",
     messages: [
       { role: "system", content: "你係 CoreLogic AI 數據審計董事。核心原則係「沒有精確時間同步與高質量 raw signal，再強的 AI 模型都沒有意義」。審查所有技術方案，用繁體中文。" },
-      { role: "user", content: `議題：${issue}\n\n策略董事建議：${geminiOutput.substring(0, 500)}\n\n請指出：1)三大風險 2)策略盲點 3)改善建議` }
+      { role: "user", content: `議題：${issue}\n\n請指出：1)三大風險 2)策略盲點 3)改善建議` }
     ]
   };
   const res = await fetch(DEEPSEEK_URL, {
@@ -75,30 +75,25 @@ export default {
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: CORS });
     }
-
     if (request.method === "GET") {
-      return Response.json({ status: "ok", version: "8.0.0" }, { headers: CORS });
+      return Response.json({ status: "ok", version: "12.0.0" }, { headers: CORS });
     }
-
     if (request.method !== "POST") {
       return Response.json({ error: "Method not allowed" }, { status: 405, headers: CORS });
     }
-
     try {
       const incoming = await request.json();
       const issue = incoming.issue || incoming.text || "請分析此議題";
 
-      // 並行呼叫 Gemini 同 Perplexity
-      const [geminiText, perplexityText] = await Promise.all([
-        callGemini(issue, env.GEMINI_API_KEY),
-        callPerplexity(issue, env.PERPLEXITY_API_KEY),
+      // 三個 AI 完全並行
+      const [geminiText, perplexityText, deepseekText] = await Promise.all([
+        callGemini(issue, env.GEMINI_API_KEY).catch(e => `[Gemini 錯誤] ${e.message}`),
+        callPerplexity(issue, env.PERPLEXITY_API_KEY).catch(e => `[Perplexity 錯誤] ${e.message}`),
+        callDeepSeek(issue, env.DEEPSEEK_API_KEY).catch(e => `[DeepSeek 錯誤] ${e.message}`),
       ]);
 
-      // DeepSeek 用 Gemini 輸出作參考
-      const deepseekText = await callDeepSeek(issue, geminiText, env.DEEPSEEK_API_KEY);
-
       return Response.json({
-        issue: issue,
+        issue,
         gemini: geminiText,
         perplexity: perplexityText,
         deepseek: deepseekText,
