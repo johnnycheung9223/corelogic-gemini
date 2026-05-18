@@ -1,5 +1,5 @@
-// Gemini + Perplexity + DeepSeek Unified Proxy — v8.0
-// Make.com 只需一個 Webhook，Worker 自動呼叫三個 AI 並返回結果
+// Gemini + Perplexity + DeepSeek Unified Proxy — v9.0
+// 修復：每個 AI 呼叫加入 25 秒 timeout，確保 Make.com 40 秒限制內完成
 // POST / with {"issue": "..."} → returns {gemini, perplexity, deepseek}
 
 const PROJECT_ID = "gemini-worker-496408";
@@ -13,6 +13,14 @@ const CORS = {
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
+
+// 每個 AI 呼叫限時 25 秒
+function withTimeout(promise, ms, name) {
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error(`${name} timeout after ${ms}ms`)), ms)
+  );
+  return Promise.race([promise, timeout]);
+}
 
 async function callGemini(issue, apiKey) {
   const body = {
@@ -77,7 +85,7 @@ export default {
     }
 
     if (request.method === "GET") {
-      return Response.json({ status: "ok", version: "8.0.0" }, { headers: CORS });
+      return Response.json({ status: "ok", version: "9.0.0" }, { headers: CORS });
     }
 
     if (request.method !== "POST") {
@@ -88,14 +96,18 @@ export default {
       const incoming = await request.json();
       const issue = incoming.issue || incoming.text || "請分析此議題";
 
-      // 並行呼叫 Gemini 同 Perplexity
+      // 並行呼叫 Gemini 同 Perplexity，各限時 25 秒
       const [geminiText, perplexityText] = await Promise.all([
-        callGemini(issue, env.GEMINI_API_KEY),
-        callPerplexity(issue, env.PERPLEXITY_API_KEY),
+        withTimeout(callGemini(issue, env.GEMINI_API_KEY), 25000, "Gemini").catch(e => `[Gemini 超時] ${e.message}`),
+        withTimeout(callPerplexity(issue, env.PERPLEXITY_API_KEY), 25000, "Perplexity").catch(e => `[Perplexity 超時] ${e.message}`),
       ]);
 
-      // DeepSeek 用 Gemini 輸出作參考
-      const deepseekText = await callDeepSeek(issue, geminiText, env.DEEPSEEK_API_KEY);
+      // DeepSeek 限時 25 秒
+      const deepseekText = await withTimeout(
+        callDeepSeek(issue, geminiText, env.DEEPSEEK_API_KEY),
+        25000,
+        "DeepSeek"
+      ).catch(e => `[DeepSeek 超時] ${e.message}`);
 
       return Response.json({
         issue: issue,
