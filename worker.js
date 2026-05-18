@@ -1,9 +1,9 @@
-// Gemini + Perplexity + DeepSeek Unified Proxy — v9.0
-// 修復：每個 AI 呼叫加入 25 秒 timeout，確保 Make.com 40 秒限制內完成
+// Gemini + Perplexity + DeepSeek Unified Proxy — v10.0
+// 修復：改用 gemini-2.0-flash + 縮短 prompt，確保 35 秒內完成
 // POST / with {"issue": "..."} → returns {gemini, perplexity, deepseek}
 
 const PROJECT_ID = "gemini-worker-496408";
-const MODEL = "gemini-2.5-flash";
+const MODEL = "gemini-2.0-flash";
 const GEMINI_URL = `https://aiplatform.googleapis.com/v1beta1/projects/${PROJECT_ID}/locations/global/publishers/google/models/${MODEL}:generateContent`;
 const PERPLEXITY_URL = "https://api.perplexity.ai/chat/completions";
 const DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions";
@@ -14,19 +14,11 @@ const CORS = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
-// 每個 AI 呼叫限時 25 秒
-function withTimeout(promise, ms, name) {
-  const timeout = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error(`${name} timeout after ${ms}ms`)), ms)
-  );
-  return Promise.race([promise, timeout]);
-}
-
 async function callGemini(issue, apiKey) {
   const body = {
     contents: [{
       role: "user",
-      parts: [{ text: `你係 CoreLogic AI 產品策略董事。Sprint 1 目標係打通高質量數據採集鏈路，成功標準係可信數據先行。請提供3個具體策略建議，每個包含行動步驟、成功指標、時間估算。用繁體中文。\n\n議題：${issue}` }]
+      parts: [{ text: `你係 CoreLogic AI 產品策略董事。請用繁體中文提供3個策略建議（每個含行動步驟+成功指標）。\n\n議題：${issue}` }]
     }]
   };
   const res = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
@@ -42,7 +34,7 @@ async function callPerplexity(issue, apiKey) {
   const body = {
     model: "sonar",
     messages: [
-      { role: "system", content: "你係 CoreLogic AI 技術情報董事。專門收集 BLE IMU、MediaPipe、Sensor Fusion 最新技術資訊。用繁體中文回應。" },
+      { role: "system", content: "你係 CoreLogic AI 技術情報董事。收集 BLE IMU、MediaPipe、Sensor Fusion 技術資訊。用繁體中文。" },
       { role: "user", content: `議題：${issue}` }
     ]
   };
@@ -62,8 +54,8 @@ async function callDeepSeek(issue, geminiOutput, apiKey) {
   const body = {
     model: "deepseek-chat",
     messages: [
-      { role: "system", content: "你係 CoreLogic AI 數據審計董事。核心原則係「沒有精確時間同步與高質量 raw signal，再強的 AI 模型都沒有意義」。審查所有技術方案，用繁體中文。" },
-      { role: "user", content: `議題：${issue}\n\n策略董事建議：${geminiOutput.substring(0, 500)}\n\n請指出：1)三大風險 2)策略盲點 3)改善建議` }
+      { role: "system", content: "你係 CoreLogic AI 數據審計董事。用繁體中文指出風險同改善建議。" },
+      { role: "user", content: `議題：${issue}\n\n策略建議摘要：${geminiOutput.substring(0, 300)}\n\n請指出：1)三大風險 2)改善建議` }
     ]
   };
   const res = await fetch(DEEPSEEK_URL, {
@@ -85,7 +77,7 @@ export default {
     }
 
     if (request.method === "GET") {
-      return Response.json({ status: "ok", version: "9.0.0" }, { headers: CORS });
+      return Response.json({ status: "ok", version: "10.0.0" }, { headers: CORS });
     }
 
     if (request.method !== "POST") {
@@ -96,21 +88,18 @@ export default {
       const incoming = await request.json();
       const issue = incoming.issue || incoming.text || "請分析此議題";
 
-      // 並行呼叫 Gemini 同 Perplexity，各限時 25 秒
+      // 並行呼叫 Gemini 同 Perplexity
       const [geminiText, perplexityText] = await Promise.all([
-        withTimeout(callGemini(issue, env.GEMINI_API_KEY), 25000, "Gemini").catch(e => `[Gemini 超時] ${e.message}`),
-        withTimeout(callPerplexity(issue, env.PERPLEXITY_API_KEY), 25000, "Perplexity").catch(e => `[Perplexity 超時] ${e.message}`),
+        callGemini(issue, env.GEMINI_API_KEY).catch(e => `[Gemini 錯誤] ${e.message}`),
+        callPerplexity(issue, env.PERPLEXITY_API_KEY).catch(e => `[Perplexity 錯誤] ${e.message}`),
       ]);
 
-      // DeepSeek 限時 25 秒
-      const deepseekText = await withTimeout(
-        callDeepSeek(issue, geminiText, env.DEEPSEEK_API_KEY),
-        25000,
-        "DeepSeek"
-      ).catch(e => `[DeepSeek 超時] ${e.message}`);
+      // DeepSeek 參考 Gemini 輸出
+      const deepseekText = await callDeepSeek(issue, geminiText, env.DEEPSEEK_API_KEY)
+        .catch(e => `[DeepSeek 錯誤] ${e.message}`);
 
       return Response.json({
-        issue: issue,
+        issue,
         gemini: geminiText,
         perplexity: perplexityText,
         deepseek: deepseekText,
