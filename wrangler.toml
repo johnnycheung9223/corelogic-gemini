@@ -1,0 +1,7 @@
+name = "corelogic-gemini"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+# GEMINI_API_KEY is set via Cloudflare Dashboard > Workers > Settings > Variables
