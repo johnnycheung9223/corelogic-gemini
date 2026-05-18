@@ -1,10 +1,8 @@
-// Gemini + Perplexity + DeepSeek Unified Proxy — v12.0
-// 修復：gemini-1.5-flash (~8-10s) + 三個 AI 完全並行
+// Gemini + Perplexity + DeepSeek Unified Proxy — v13.0
+// 修復：Gemini 改用 /v1beta/models/ 路徑 (API key 模式)
 // POST / with {"issue": "..."} → returns {gemini, perplexity, deepseek}
 
-const PROJECT_ID = "gemini-worker-496408";
-const MODEL = "gemini-1.5-flash";
-const GEMINI_URL = `https://aiplatform.googleapis.com/v1beta1/projects/${PROJECT_ID}/locations/global/publishers/google/models/${MODEL}:generateContent`;
+const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
 const PERPLEXITY_URL = "https://api.perplexity.ai/chat/completions";
 const DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions";
 
@@ -76,7 +74,7 @@ export default {
       return new Response(null, { status: 204, headers: CORS });
     }
     if (request.method === "GET") {
-      return Response.json({ status: "ok", version: "12.0.0" }, { headers: CORS });
+      return Response.json({ status: "ok", version: "13.0.0" }, { headers: CORS });
     }
     if (request.method !== "POST") {
       return Response.json({ error: "Method not allowed" }, { status: 405, headers: CORS });
