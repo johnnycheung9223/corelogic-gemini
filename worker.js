@@ -1,8 +1,7 @@
-// Gemini + Perplexity + DeepSeek Unified Proxy — v13.0
-// 修復：Gemini 改用 /v1beta/models/ 路徑 (API key 模式)
-// POST / with {"issue": "..."} → returns {gemini, perplexity, deepseek}
+// Perplexity + DeepSeek Unified Proxy — v14.0
+// Gemini 移除（香港地區限制）
+// POST / with {"issue": "..."} → returns {perplexity, deepseek, gemini}
 
-const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
 const PERPLEXITY_URL = "https://api.perplexity.ai/chat/completions";
 const DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions";
 
@@ -11,22 +10,6 @@ const CORS = {
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
-
-async function callGemini(issue, apiKey) {
-  const body = {
-    contents: [{
-      role: "user",
-      parts: [{ text: `你係 CoreLogic AI 產品策略董事。Sprint 1 目標係打通高質量數據採集鏈路，成功標準係可信數據先行。請提供3個具體策略建議，每個包含行動步驟、成功指標、時間估算。用繁體中文。\n\n議題：${issue}` }]
-    }]
-  };
-  const res = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  return data?.candidates?.[0]?.content?.parts?.[0]?.text || JSON.stringify(data);
-}
 
 async function callPerplexity(issue, apiKey) {
   const body = {
@@ -74,7 +57,7 @@ export default {
       return new Response(null, { status: 204, headers: CORS });
     }
     if (request.method === "GET") {
-      return Response.json({ status: "ok", version: "13.0.0" }, { headers: CORS });
+      return Response.json({ status: "ok", version: "14.0.0" }, { headers: CORS });
     }
     if (request.method !== "POST") {
       return Response.json({ error: "Method not allowed" }, { status: 405, headers: CORS });
@@ -83,16 +66,14 @@ export default {
       const incoming = await request.json();
       const issue = incoming.issue || incoming.text || "請分析此議題";
 
-      // 三個 AI 完全並行
-      const [geminiText, perplexityText, deepseekText] = await Promise.all([
-        callGemini(issue, env.GEMINI_API_KEY).catch(e => `[Gemini 錯誤] ${e.message}`),
+      const [perplexityText, deepseekText] = await Promise.all([
         callPerplexity(issue, env.PERPLEXITY_API_KEY).catch(e => `[Perplexity 錯誤] ${e.message}`),
         callDeepSeek(issue, env.DEEPSEEK_API_KEY).catch(e => `[DeepSeek 錯誤] ${e.message}`),
       ]);
 
       return Response.json({
         issue,
-        gemini: geminiText,
+        gemini: "（Gemini 香港地區不支援）",
         perplexity: perplexityText,
         deepseek: deepseekText,
       }, { headers: CORS });
