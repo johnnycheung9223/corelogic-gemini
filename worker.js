@@ -1,5 +1,5 @@
-// CoreLogic AI Board — Worker v17.2
-// v17.1: 加入 /debug 端點診斷 Azure 連線問題
+// CoreLogic AI Board — Worker v17.3
+// v17.3: 支援 Azure AI Foundry Target URI 格式（直接使用完整 endpoint）
 
 const PERPLEXITY_URL = "https://api.perplexity.ai/chat/completions";
 const DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions";
@@ -10,13 +10,27 @@ const CORS = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
+// Azure URL 組合 — 支援三種格式：
+// 格式A: https://resource.openai.azure.com/ → 組合 /openai/deployments/<name>/chat/completions
+// 格式B: https://resource.openai.azure.com/openai/deployments/<name>/... → 直接附加 chat/completions
+// 格式C: Azure AI Foundry Target URI → 直接使用（已包含完整路徑含 api-version）
 function buildAzureUrl(endpoint, deploymentName) {
   const base = endpoint.trim().replace(/\/$/, "");
+
+  // 格式C: Foundry Target URI — 已包含 chat/completions 或 完整路徑
+  if (base.includes("chat/completions")) {
+    // Already a full URL, just ensure api-version is present
+    if (base.includes("api-version")) return base;
+    return base + (base.includes("?") ? "&" : "?") + "api-version=2024-10-21";
+  }
+
+  // 格式B: 已包含 /deployments/ 路徑
   if (base.includes("/deployments/")) {
     return `${base}/chat/completions?api-version=2024-10-21`;
-  } else {
-    return `${base}/openai/deployments/${deploymentName}/chat/completions?api-version=2024-10-21`;
   }
+
+  // 格式A: 標準 resource endpoint
+  return `${base}/openai/deployments/${deploymentName}/chat/completions?api-version=2024-10-21`;
 }
 
 async function callPerplexity(issue, apiKey) {
@@ -57,8 +71,8 @@ async function callAzureOpenAI(issue, perplexityReport, deepseekReport, endpoint
   const url = buildAzureUrl(endpoint, deploymentName);
   const body = {
     messages: [
-      { role: "system", content: "你係 CoreLogic AI 產品策略董事。整合情報董事同審計董事的報告，制定清晰、可執行的產品策略。用繁體中文，格式為執行清單。" },
-      { role: "user", content: `議題：${issue}\n\n【情報董事】\n${perplexityReport.substring(0, 800)}\n\n【審計董事】\n${deepseekReport.substring(0, 800)}\n\n請制定：1)最終策略方向 2)行動清單（含時間+指標）3)給決策者的建議` }
+      { role: "system", content: "你係 CoreLogic AI 產品策略董事。整合情報董事同審計董事的報告，制定清晰、可執行的產品策略。重點係：Sprint 目標達成、資源效率、風險緩解。提供具體行動清單，每項有負責方向、時間估算、成功指標。用繁體中文，格式為執行清單。" },
+      { role: "user", content: `議題：${issue}\n\n【情報董事報告摘要】\n${perplexityReport.substring(0, 800)}\n\n【審計董事報告摘要】\n${deepseekReport.substring(0, 800)}\n\n請制定：1)本議題最終策略方向 2)具體行動清單（每項含時間+成功指標）3)給最終決策者的建議` }
     ],
     max_tokens: 1000
   };
@@ -68,41 +82,32 @@ async function callAzureOpenAI(issue, perplexityReport, deepseekReport, endpoint
     body: JSON.stringify(body),
   });
   const text = await res.text();
-  // Try parse JSON, if fails return raw text for debugging
   try {
     const data = JSON.parse(text);
     if (data?.error) return `[Azure 錯誤] code=${data.error.code} msg=${data.error.message}`;
     return data?.choices?.[0]?.message?.content || JSON.stringify(data);
   } catch(e) {
-    return `[Azure HTML錯誤] URL=${url} Status=${res.status} Body=${text.substring(0,300)}`;
+    return `[Azure HTML錯誤] URL=${url} Status=${res.status} Body=${text.substring(0, 300)}`;
   }
 }
 
 export default {
   async fetch(request, env) {
-    const url = new URL(request.url);
-
+    const urlObj = new URL(request.url);
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
 
-    // GET /debug — show Azure config (masked key) and test URL
-    if (request.method === "GET" && url.pathname === "/debug") {
+    if (request.method === "GET" && urlObj.pathname === "/debug") {
       const ep = env.AZURE_OPENAI_ENDPOINT || "NOT_SET";
       const dn = env.AZURE_DEPLOYMENT_NAME || "gpt-4o";
-      const key = env.AZURE_OPENAI_KEY ? env.AZURE_OPENAI_KEY.substring(0,8) + "..." : "NOT_SET";
-      const builtUrl = (ep !== "NOT_SET") ? buildAzureUrl(ep, dn) : "cannot build — endpoint not set";
-      return Response.json({
-        azure_endpoint: ep,
-        azure_deployment: dn,
-        azure_key_prefix: key,
-        built_url: builtUrl,
-        azure_ready: !!(env.AZURE_OPENAI_KEY && env.AZURE_OPENAI_ENDPOINT)
-      }, { headers: CORS });
+      const key = env.AZURE_OPENAI_KEY ? env.AZURE_OPENAI_KEY.substring(0, 8) + "..." : "NOT_SET";
+      const builtUrl = (ep !== "NOT_SET") ? buildAzureUrl(ep, dn) : "cannot build";
+      return Response.json({ azure_endpoint_stored: ep.substring(0, 60), azure_deployment: dn, azure_key_prefix: key, built_url: builtUrl, azure_ready: !!(env.AZURE_OPENAI_KEY && env.AZURE_OPENAI_ENDPOINT) }, { headers: CORS });
     }
 
     if (request.method === "GET") {
       return Response.json({
-        status: "ok", version: "17.2.0",
-        board: ["perplexity","deepseek","azure-gpt4o"],
+        status: "ok", version: "17.3.0",
+        board: ["perplexity", "deepseek", "azure-gpt4o"],
         azure_ready: !!(env.AZURE_OPENAI_KEY && env.AZURE_OPENAI_ENDPOINT),
         azure_deployment: env.AZURE_DEPLOYMENT_NAME || "gpt-4o"
       }, { headers: CORS });
