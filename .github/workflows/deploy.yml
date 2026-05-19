@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -20,7 +21,13 @@ jobs:
             GEMINI_API_KEY
             PERPLEXITY_API_KEY
             DEEPSEEK_API_KEY
+            AZURE_OPENAI_KEY
+            AZURE_OPENAI_ENDPOINT
+            AZURE_DEPLOYMENT_NAME
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          AZURE_OPENAI_KEY: ${{ secrets.AZURE_OPENAI_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_DEPLOYMENT_NAME: ${{ secrets.AZURE_DEPLOYMENT_NAME }}
