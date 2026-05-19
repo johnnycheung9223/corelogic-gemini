@@ -57,7 +57,7 @@ export default {
       return new Response(null, { status: 204, headers: CORS });
     }
     if (request.method === "GET") {
-      return Response.json({ status: "ok", version: "14.0.0" }, { headers: CORS });
+      return Response.json({ status: "ok", version: "15.0.0" }, { headers: CORS });
     }
     if (request.method !== "POST") {
       return Response.json({ error: "Method not allowed" }, { status: 405, headers: CORS });
@@ -74,8 +74,8 @@ export default {
       return Response.json({
         issue,
         gemini: "（Gemini 香港地區不支援）",
-        perplexity: perplexityText,
-        deepseek: deepseekText,
+        perplexity: perplexityText.substring(0, 1800),
+        deepseek: deepseekText.substring(0, 1800),
       }, { headers: CORS });
 
     } catch (err) {
