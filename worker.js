@@ -1,4 +1,4 @@
-// CoreLogic AI Board — Worker v17.1
+// CoreLogic AI Board — Worker v17.2
 // v17.1: 加入 /debug 端點診斷 Azure 連線問題
 
 const PERPLEXITY_URL = "https://api.perplexity.ai/chat/completions";
@@ -11,7 +11,7 @@ const CORS = {
 };
 
 function buildAzureUrl(endpoint, deploymentName) {
-  const base = endpoint.replace(/\/$/, "");
+  const base = endpoint.trim().replace(/\/$/, "");
   if (base.includes("/deployments/")) {
     return `${base}/chat/completions?api-version=2024-10-21`;
   } else {
@@ -101,7 +101,7 @@ export default {
 
     if (request.method === "GET") {
       return Response.json({
-        status: "ok", version: "17.1.0",
+        status: "ok", version: "17.2.0",
         board: ["perplexity","deepseek","azure-gpt4o"],
         azure_ready: !!(env.AZURE_OPENAI_KEY && env.AZURE_OPENAI_ENDPOINT),
         azure_deployment: env.AZURE_DEPLOYMENT_NAME || "gpt-4o"
