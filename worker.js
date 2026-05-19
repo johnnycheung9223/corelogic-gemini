@@ -1,6 +1,5 @@
-// CoreLogic AI Board — Worker v17.0
-// 三董事架構：Perplexity（情報）→ DeepSeek（審計）→ Azure OpenAI GPT-4o（策略）
-// v17 改進：Azure URL 自動組合（支援兩種 endpoint 格式）+ Deployment Name 環境變數
+// CoreLogic AI Board — Worker v17.1
+// v17.1: 加入 /debug 端點診斷 Azure 連線問題
 
 const PERPLEXITY_URL = "https://api.perplexity.ai/chat/completions";
 const DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions";
@@ -11,29 +10,20 @@ const CORS = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
-// Azure URL 組合：支援兩種格式
-// 格式A: https://resource.openai.azure.com/ + deployments/<name>/
-// 格式B: https://resource.openai.azure.com/openai/deployments/<name>/ (已含路徑)
 function buildAzureUrl(endpoint, deploymentName) {
-  const base = endpoint.replace(/\/$/, ""); // 移除尾部斜線
+  const base = endpoint.replace(/\/$/, "");
   if (base.includes("/deployments/")) {
-    // 格式B：endpoint 已包含 deployment path
     return `${base}/chat/completions?api-version=2024-10-21`;
   } else {
-    // 格式A：標準 resource endpoint，需組合 deployment name
     return `${base}/openai/deployments/${deploymentName}/chat/completions?api-version=2024-10-21`;
   }
 }
 
-// Step 1: 情報董事 Perplexity — 收集最新技術情報
 async function callPerplexity(issue, apiKey) {
   const body = {
     model: "sonar",
     messages: [
-      {
-        role: "system",
-        content: "你係 CoreLogic AI 技術情報董事。專門收集 BLE IMU、MediaPipe、Sensor Fusion、運動科技穿戴最新技術資訊同業界動態。提供具體、可執行的技術建議。用繁體中文回應，格式清晰。"
-      },
+      { role: "system", content: "你係 CoreLogic AI 技術情報董事。專門收集 BLE IMU、MediaPipe、Sensor Fusion、運動科技穿戴最新技術資訊同業界動態。提供具體、可執行的技術建議。用繁體中文回應，格式清晰。" },
       { role: "user", content: `CoreLogic AI 議題：${issue}\n\n請提供：1)最新技術情報 2)可落地方案 3)具體工具/庫推薦` }
     ]
   };
@@ -46,19 +36,12 @@ async function callPerplexity(issue, apiKey) {
   return data?.choices?.[0]?.message?.content || JSON.stringify(data);
 }
 
-// Step 2: 審計董事 DeepSeek — 審計 Perplexity 的情報，指出風險
 async function callDeepSeek(issue, perplexityReport, apiKey) {
   const body = {
     model: "deepseek-chat",
     messages: [
-      {
-        role: "system",
-        content: "你係 CoreLogic AI 數據審計董事。核心原則：「沒有精確時間同步與高質量 raw signal，再強的 AI 模型都沒有意義」。你的職責係審查情報董事的建議，指出風險、盲點，並提出改善方案。用繁體中文，語氣嚴謹直接。"
-      },
-      {
-        role: "user",
-        content: `議題：${issue}\n\n【情報董事報告】\n${perplexityReport.substring(0, 1200)}\n\n請以審計角度：1)三大風險 2)策略盲點 3)數據質量要求 4)改善建議`
-      }
+      { role: "system", content: "你係 CoreLogic AI 數據審計董事。核心原則：「沒有精確時間同步與高質量 raw signal，再強的 AI 模型都沒有意義」。你的職責係審查情報董事的建議，指出風險、盲點，並提出改善方案。用繁體中文，語氣嚴謹直接。" },
+      { role: "user", content: `議題：${issue}\n\n【情報董事報告】\n${perplexityReport.substring(0, 1200)}\n\n請以審計角度：1)三大風險 2)策略盲點 3)數據質量要求 4)改善建議` }
     ]
   };
   const res = await fetch(DEEPSEEK_URL, {
@@ -70,68 +53,74 @@ async function callDeepSeek(issue, perplexityReport, apiKey) {
   return data?.choices?.[0]?.message?.content || JSON.stringify(data);
 }
 
-// Step 3: 策略董事 Azure OpenAI GPT-4o — 整合兩份報告，制定最終策略
 async function callAzureOpenAI(issue, perplexityReport, deepseekReport, endpoint, deploymentName, apiKey) {
   const url = buildAzureUrl(endpoint, deploymentName);
   const body = {
     messages: [
-      {
-        role: "system",
-        content: "你係 CoreLogic AI 產品策略董事。你的職責係整合情報董事同審計董事的報告，制定清晰、可執行的產品策略。重點係：Sprint 目標達成、資源效率、風險緩解。提供具體行動清單，每項有負責方向、時間估算、成功指標。用繁體中文，格式為執行清單。"
-      },
-      {
-        role: "user",
-        content: `議題：${issue}\n\n【情報董事報告摘要】\n${perplexityReport.substring(0, 800)}\n\n【審計董事報告摘要】\n${deepseekReport.substring(0, 800)}\n\n請制定：1)本議題最終策略方向 2)具體行動清單（每項含時間+成功指標）3)給最終決策者的建議`
-      }
+      { role: "system", content: "你係 CoreLogic AI 產品策略董事。整合情報董事同審計董事的報告，制定清晰、可執行的產品策略。用繁體中文，格式為執行清單。" },
+      { role: "user", content: `議題：${issue}\n\n【情報董事】\n${perplexityReport.substring(0, 800)}\n\n【審計董事】\n${deepseekReport.substring(0, 800)}\n\n請制定：1)最終策略方向 2)行動清單（含時間+指標）3)給決策者的建議` }
     ],
     max_tokens: 1000
   };
   const res = await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "api-key": apiKey
-    },
+    headers: { "Content-Type": "application/json", "api-key": apiKey },
     body: JSON.stringify(body),
   });
-  const data = await res.json();
-  if (data?.error) return `[Azure 錯誤] ${JSON.stringify(data.error)}`;
-  return data?.choices?.[0]?.message?.content || JSON.stringify(data);
+  const text = await res.text();
+  // Try parse JSON, if fails return raw text for debugging
+  try {
+    const data = JSON.parse(text);
+    if (data?.error) return `[Azure 錯誤] code=${data.error.code} msg=${data.error.message}`;
+    return data?.choices?.[0]?.message?.content || JSON.stringify(data);
+  } catch(e) {
+    return `[Azure HTML錯誤] URL=${url} Status=${res.status} Body=${text.substring(0,300)}`;
+  }
 }
 
 export default {
   async fetch(request, env) {
-    if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: CORS });
-    }
-    if (request.method === "GET") {
-      const azureReady = !!(env.AZURE_OPENAI_KEY && env.AZURE_OPENAI_ENDPOINT);
+    const url = new URL(request.url);
+
+    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+
+    // GET /debug — show Azure config (masked key) and test URL
+    if (request.method === "GET" && url.pathname === "/debug") {
+      const ep = env.AZURE_OPENAI_ENDPOINT || "NOT_SET";
+      const dn = env.AZURE_DEPLOYMENT_NAME || "gpt-4o";
+      const key = env.AZURE_OPENAI_KEY ? env.AZURE_OPENAI_KEY.substring(0,8) + "..." : "NOT_SET";
+      const builtUrl = (ep !== "NOT_SET") ? buildAzureUrl(ep, dn) : "cannot build — endpoint not set";
       return Response.json({
-        status: "ok",
-        version: "17.0.0",
-        board: ["perplexity", "deepseek", "azure-gpt4o"],
-        azure_ready: azureReady,
+        azure_endpoint: ep,
+        azure_deployment: dn,
+        azure_key_prefix: key,
+        built_url: builtUrl,
+        azure_ready: !!(env.AZURE_OPENAI_KEY && env.AZURE_OPENAI_ENDPOINT)
+      }, { headers: CORS });
+    }
+
+    if (request.method === "GET") {
+      return Response.json({
+        status: "ok", version: "17.1.0",
+        board: ["perplexity","deepseek","azure-gpt4o"],
+        azure_ready: !!(env.AZURE_OPENAI_KEY && env.AZURE_OPENAI_ENDPOINT),
         azure_deployment: env.AZURE_DEPLOYMENT_NAME || "gpt-4o"
       }, { headers: CORS });
     }
-    if (request.method !== "POST") {
-      return Response.json({ error: "Method not allowed" }, { status: 405, headers: CORS });
-    }
+
+    if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405, headers: CORS });
 
     try {
       const incoming = await request.json();
       const issue = incoming.issue || incoming.text || "請分析此議題";
       const deploymentName = env.AZURE_DEPLOYMENT_NAME || "gpt-4o";
 
-      // Step 1: 情報董事
       const perplexityText = await callPerplexity(issue, env.PERPLEXITY_API_KEY)
         .catch(e => `[Perplexity 錯誤] ${e.message}`);
 
-      // Step 2: 審計董事（參考情報董事報告）
       const deepseekText = await callDeepSeek(issue, perplexityText, env.DEEPSEEK_API_KEY)
         .catch(e => `[DeepSeek 錯誤] ${e.message}`);
 
-      // Step 3: 策略董事（整合兩份報告）
       let strategyText = "（策略董事待設定：需要 Azure OpenAI API Key）";
       if (env.AZURE_OPENAI_KEY && env.AZURE_OPENAI_ENDPOINT) {
         strategyText = await callAzureOpenAI(
